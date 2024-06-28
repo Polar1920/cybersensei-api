@@ -330,6 +330,17 @@ app.delete('/modulos/:id', authenticateToken, async (req, res) => {
   }
 });
 
+// Obtener todas las páginas de un módulo
+app.get('/modulos/:modulo_id/paginas', authenticateToken, async (req, res) => {
+  const { modulo_id } = req.params;
+  try {
+    const paginas = await Pagina.findAll({ where: { modulo_id } });
+    res.status(200).json(paginas);
+  } catch (error) {
+    res.status(400).json({ message: 'Error al obtener páginas del módulo', error });
+  }
+});
+
 // CRUD de páginas
 app.post('/paginas', authenticateToken, async (req, res) => {
   const { modulo_id, orden, contenido, tipo } = req.body;
