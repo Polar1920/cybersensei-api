@@ -78,6 +78,10 @@ const Pagina = sequelize.define('paginas', {
     primaryKey: true,
     autoIncrement: true,
   },
+  nombre: {
+    type: Sequelize.STRING,
+    allowNull: false,
+  },
   modulo_id: {
     type: Sequelize.INTEGER,
     allowNull: false,
@@ -87,7 +91,9 @@ const Pagina = sequelize.define('paginas', {
     },
   },
   orden: Sequelize.INTEGER,
-  contenido: Sequelize.JSON,
+  contenido0: Sequelize.STRING,
+  contenido1: Sequelize.STRING,
+  contenido2: Sequelize.STRING,
   tipo: {
     type: Sequelize.ENUM('inicio', 'informacion', 'quiz', 'prueba'),
     allowNull: false,
@@ -334,7 +340,10 @@ app.delete('/modulos/:id', authenticateToken, async (req, res) => {
 app.get('/modulos/:modulo_id/paginas', authenticateToken, async (req, res) => {
   const { modulo_id } = req.params;
   try {
-    const paginas = await Pagina.findAll({ where: { modulo_id } });
+    const paginas = await Pagina.findAll({
+      where: { modulo_id },
+      attributes: ['id', 'nombre', 'orden']
+    });
     res.status(200).json(paginas);
   } catch (error) {
     res.status(400).json({ message: 'Error al obtener páginas del módulo', error });
@@ -343,9 +352,9 @@ app.get('/modulos/:modulo_id/paginas', authenticateToken, async (req, res) => {
 
 // CRUD de páginas
 app.post('/paginas', authenticateToken, async (req, res) => {
-  const { modulo_id, orden, contenido, tipo } = req.body;
+  const { nombre, modulo_id, orden, contenido0, tipo } = req.body;
   try {
-    const newPagina = await Pagina.create({ modulo_id, orden, contenido, tipo });
+    const newPagina = await Pagina.create({ nombre, modulo_id, orden, contenido0, tipo });
     res.status(201).json(newPagina);
   } catch (error) {
     res.status(400).json({ message: 'Error al crear página', error });
@@ -376,13 +385,13 @@ app.get('/paginas/:id', authenticateToken, async (req, res) => {
 
 app.put('/paginas/:id', authenticateToken, async (req, res) => {
   const { id } = req.params;
-  const { modulo_id, orden, contenido, tipo } = req.body;
+  const { nombre, orden, contenido0, contenido1, contenido2, tipo } = req.body;
   try {
     const pagina = await Pagina.findByPk(id);
     if (!pagina) {
       return res.status(404).json({ message: 'Página no encontrada' });
     }
-    await pagina.update({ modulo_id, orden, contenido, tipo });
+    await pagina.update({ nombre, orden, contenido0, contenido1, contenido2, tipo });
     res.status(200).json(pagina);
   } catch (error) {
     res.status(400).json({ message: 'Error al actualizar página', error });
