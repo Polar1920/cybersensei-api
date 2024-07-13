@@ -5,16 +5,18 @@ const Sequelize = require('sequelize');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcrypt');
 const nodemailer = require('nodemailer');
+const fs = require('fs');
+const path = require('path');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 const SECRET_KEY = 'your_secret_key';
 
 // Configuración de Sequelize
-const sequelize = new Sequelize('cyber_sensei', 'root', '', {
-  host: 'localhost',
+const sequelize = new Sequelize('cyber_sensei', 'root', '123', {
+  host: '127.0.0.1',
   dialect: 'mysql', // Puedes cambiar a 'postgres', 'sqlite', etc.
-  logging: false, // Desactiva los logs de Sequelize si lo deseas
+  logging: false, // Desactiva los logs de Sequelize si lo deseas
 });
 
 // Definición de modelos
@@ -153,13 +155,77 @@ function generateToken(user) {
 }
 
 // Nodemailer transporter para envío de correos
-const transporter = nodemailer.createTransport({
-  service: 'gmail',
-  auth: {
-    user: 'tu_correo@gmail.com',
-    pass: 'tu_contraseña',
-  },
-});
+
+// Función para enviar el código de verificación por correo electrónico
+async function enviarCodigoVerificacion(correo, codigo) {
+  // Configuración de Nodemailer para Zoho Mail
+  const transporter = nodemailer.createTransport({
+    host: 'smtp.zoho.com',
+    port: 587,
+    secure: false, // Utiliza `true` solo si usas el puerto 465
+    auth: {
+      user: 'noreplay@cybersensei.site', // tu correo de Zoho
+      pass: 'Dmpp1991@26' // tu contraseña de Zoho
+    },
+    tls: {
+      rejectUnauthorized: false
+    }
+  });
+
+  const mailOptions = {
+    from: 'Cyber Sensei <noreplay@cybersensei.site>',
+    to: correo,
+    subject: 'Código de Verificación',
+    text: `Tu código de verificación es: ${codigo}`,
+    html: `<b>Tu código de verificación es: ${codigo}</b>`,
+  };
+
+  // Enviar correo
+  await transporter.sendMail(mailOptions, (error, info) => {
+    if (error) {
+      return console.log(error);
+    }
+    console.log('Correo enviado: ' + info.response);
+  });
+}
+
+async function msgRegistro(correo, nombre) {
+  // Configuración de Nodemailer para Zoho Mail
+  const transporter = nodemailer.createTransport({
+    host: 'smtp.zoho.com',
+    port: 587,
+    secure: false, // Utiliza true solo si usas el puerto 465
+    auth: {
+      user: 'noreplay@cybersensei.site', // tu correo de Zoho
+      pass: 'Dmpp1991@26' // tu contraseña de Zoho
+    },
+    tls: {
+      rejectUnauthorized: false
+    }
+  });
+
+  // Leer el contenido del archivo HTML
+  const htmlTemplate = fs.readFileSync(path.join(__dirname, 'template.html'), 'utf-8');
+  
+  // Reemplazar los placeholders con los valores reales
+  const personalizedHtml = htmlTemplate.replace('Bienvenido', 'Bienvenido, ' + nombre + '!!');
+
+  const mailOptions = {
+    from: 'Cyber Sensei <noreplay@cybersensei.site>',
+    to: correo,
+    subject: 'Registro exitoso',
+    text: 'Bienvenido!',
+    html: personalizedHtml,
+  };
+
+  // Enviar correo
+  await transporter.sendMail(mailOptions, (error, info) => {
+    if (error) {
+      return console.log(error);
+    }
+    console.log('Correo enviado: ' + info.response);
+  });
+}
 
 // Rutas y controladores
 
@@ -175,6 +241,7 @@ app.post('/register', async (req, res) => {
       password: hashedPassword,
       tipo,
     });
+    await msgRegistro(correo, nombre);
     res.status(201).json({ message: 'Usuario registrado exitosamente' });
   } catch (error) {
     res.status(400).json({ message: 'Error al registrar usuario', error });
@@ -187,15 +254,21 @@ app.post('/login', async (req, res) => {
   try {
     const user = await Usuario.findOne({ where: { correo } });
     if (!user) {
-      return res.status(404).json({ message: 'Usuario no encontrado' });
+      return res.status(401).json({ message: 'Correo o contraseña incorrectos' });
     }
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
-      return res.status(401).json({ message: 'Contraseña incorrecta' });
+      return res.status(401).json({ message: 'Correo o contraseña incorrectos' });
     }
-    const token = generateToken(user);
-    res.status(200).json({ token });
+    // Generar y guardar token de verificación en dos pasos (2FA)
+    const token_2FA = Math.floor(1000 + Math.random() * 9000).toString(); // Genera un código de 4 dígitos
+    user.token_2FA = token_2FA;
+    await user.save();
+    // Enviar el código de verificación por correo electrónico
+    await enviarCodigoVerificacion(user.correo, token_2FA);
+    res.status(200).json({ message: 'Correo y contraseña correctos, código de verificación enviado' });
   } catch (error) {
+    console.error('Error al iniciar sesión:', error);
     res.status(500).json({ message: 'Error al iniciar sesión', error });
   }
 });
@@ -206,11 +279,14 @@ app.post('/verify-2fa', async (req, res) => {
   try {
     const user = await Usuario.findOne({ where: { correo, token_2FA } });
     if (!user) {
-      return res.status(404).json({ message: 'Código de verificación incorrecto' });
+      return res.status(401).json({ message: 'Código de verificación incorrecto' });
     }
-    const token = generateToken(user);
-    res.status(200).json({ token });
+    const token = jwt.sign({ id: user.id }, SECRET_KEY, { expiresIn: '1h' });
+    user.token_2FA = null; // Elimina el código de verificación después de usarlo
+    await user.save();
+    res.status(200).json({ message: 'Verificación en dos pasos exitosa', token });
   } catch (error) {
+    console.error('Error en la verificación en dos pasos:', error);
     res.status(500).json({ message: 'Error en la verificación en dos pasos', error });
   }
 });
@@ -241,6 +317,40 @@ app.post('/recover', async (req, res) => {
     });
   } catch (error) {
     res.status(500).json({ message: 'Error en la recuperación de cuenta', error });
+  }
+});
+
+// Obtener datos de usuario por correo electrónico
+app.get('/user', authenticateToken, async (req, res) => {
+  const { correo } = req.query; // Cambiado de req.body a req.query
+  try {
+    const usuario = await Usuario.findOne({ where: { correo } });
+    if (!usuario) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
+    // Filtramos los datos sensibles que no queremos enviar al cliente, como el password
+    const { id, nombre, apellido, edad, tipo, admin, createdAt, updatedAt } = usuario;
+    res.status(200).json({ id, nombre, apellido, correo, edad, tipo, admin, createdAt, updatedAt });
+  } catch (error) {
+    res.status(500).json({ message: 'Error al obtener datos del usuario', error });
+  }
+});
+
+// Actualizar datos de usuario por correo electrónico
+app.put('/user', authenticateToken, async (req, res) => {
+  const { correo } = req.user; // Obtenemos el correo del usuario autenticado
+  const { nombre, apellido, edad, tipo } = req.body;
+  try {
+    const usuario = await Usuario.findOne({ where: { correo } });
+    if (!usuario) {
+      return res.status(404).json({ message: 'Usuario no encontrado' });
+    }
+    await usuario.update({ nombre, apellido, edad, tipo });
+    // Retornamos los datos actualizados para confirmación
+    const { id, admin, createdAt, updatedAt } = usuario;
+    res.status(200).json({ id, nombre, apellido, correo, edad, tipo, admin, createdAt, updatedAt });
+  } catch (error) {
+    res.status(500).json({ message: 'Error al actualizar datos del usuario', error });
   }
 });
 
@@ -342,7 +452,7 @@ app.get('/modulos/:modulo_id/paginas', authenticateToken, async (req, res) => {
   try {
     const paginas = await Pagina.findAll({
       where: { modulo_id },
-      attributes: ['id', 'nombre', 'orden']
+      attributes: ['id', 'nombre', 'orden', 'modulo_id']
     });
     res.status(200).json(paginas);
   } catch (error) {
@@ -352,9 +462,9 @@ app.get('/modulos/:modulo_id/paginas', authenticateToken, async (req, res) => {
 
 // CRUD de páginas
 app.post('/paginas', authenticateToken, async (req, res) => {
-  const { nombre, modulo_id, orden, contenido0, tipo } = req.body;
+  const { nombre, modulo_id, orden, contenido0, contenido1, contenido2, tipo } = req.body;
   try {
-    const newPagina = await Pagina.create({ nombre, modulo_id, orden, contenido0, tipo });
+    const newPagina = await Pagina.create({ nombre, modulo_id, orden, contenido0, contenido1, contenido2, tipo });
     res.status(201).json(newPagina);
   } catch (error) {
     res.status(400).json({ message: 'Error al crear página', error });
@@ -436,3 +546,5 @@ app.get('/respuestas', authenticateToken, async (req, res) => {
 app.listen(PORT, () => {
   console.log(`Servidor API escuchando en el puerto ${PORT}`);
 });
+
+
